@@ -1,57 +1,62 @@
 <?php
 declare(strict_types=1);
 
-// Ponto de entrada: encaminha cada URL para sua ação.
-$caminho = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-$metodo = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-
-// Somente os arquivos públicos conhecidos são servidos diretamente pelo PHP CLI.
-if (PHP_SAPI === 'cli-server' && in_array($caminho, ['/assets/app.js', '/assets/style.css'], true)) {
+// O servidor PHP entrega apenas estes arquivos públicos diretamente.
+$caminho = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if (PHP_SAPI === 'cli-server' && in_array($caminho, ['/assets/style.css', '/assets/cep.js'], true)) {
     return false;
 }
 
 header('X-Content-Type-Options: nosniff');
-header('Referrer-Policy: same-origin');
-header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+header("Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+header('Content-Type: text/html; charset=utf-8');
+header('Cache-Control: no-store');
 
-$raiz = dirname(__DIR__);
-require $raiz . '/app/Core/Http.php';
-require $raiz . '/app/Core/BancoDeDados.php';
-require $raiz . '/app/Models/Cliente.php';
-require $raiz . '/app/Controllers/ClienteController.php';
-require $raiz . '/app/Controllers/CepController.php';
-require $raiz . '/app/Services/ViaCepService.php';
+// A v2 usa sua própria sessão e seu próprio arquivo SQLite.
+session_name('cadastro_clientes_v2');
+session_start(['cookie_httponly' => true, 'cookie_samesite' => 'Lax', 'use_strict_mode' => true]);
+if (!isset($_SESSION['csrf'])) {
+    $_SESSION['csrf'] = bin2hex(random_bytes(32));
+}
+
+require __DIR__ . '/../app/Models/Cliente.php';
+require __DIR__ . '/../app/Services/ViaCepService.php';
+require __DIR__ . '/../app/Controllers/ClienteController.php';
+
+$acao = $_GET['acao'] ?? 'listar';
+$rotas = ['listar' => 'GET', 'novo' => 'GET', 'editar' => 'GET', 'salvar' => 'POST', 'cep' => 'GET'];
+if (!is_string($acao) || !isset($rotas[$acao]) || !in_array($caminho, ['/', '/index.php'], true)) {
+    http_response_code(404);
+    exit('Página não encontrada.');
+}
+if ($_SERVER['REQUEST_METHOD'] !== $rotas[$acao]) {
+    header('Allow: ' . $rotas[$acao]);
+    http_response_code(405);
+    exit('Método não permitido.');
+}
+if ((int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 16384) {
+    http_response_code(413);
+    exit('O formulário enviado é muito grande.');
+}
 
 try {
-    if ($caminho === '/') {
-        Http::permitirMetodo($metodo, ['GET']);
-        header('Content-Type: text/html; charset=utf-8');
-        require $raiz . '/app/Views/clientes.php';
-        exit;
+    $banco = require __DIR__ . '/../config/banco.php';
+    $controller = new ClienteController(new Cliente($banco));
+
+    switch ($acao) {
+        case 'listar': $controller->listar(); break;
+        case 'novo': $controller->novo(); break;
+        case 'editar': $controller->editar(); break;
+        case 'salvar': $controller->salvar(); break;
+        case 'cep': $controller->consultarCep(); break;
     }
-    if ($caminho === '/api/clientes') {
-        Http::permitirMetodo($metodo, ['GET', 'POST']);
-        $controller = new ClienteController(new Cliente(BancoDeDados::conectar()));
-        if ($metodo === 'GET') {
-            $controller->listar();
-        }
-        $controller->salvar();
-    }
-    if (preg_match('#^/api/clientes/([1-9][0-9]{0,9})$#D', $caminho, $partes)) {
-        Http::permitirMetodo($metodo, ['GET', 'PUT']);
-        $controller = new ClienteController(new Cliente(BancoDeDados::conectar()));
-        $id = (int) $partes[1];
-        if ($metodo === 'GET') {
-            $controller->buscar($id);
-        }
-        $controller->salvar($id);
-    }
-    if (preg_match('#^/api/cep/([^/]+)$#D', $caminho, $partes)) {
-        Http::permitirMetodo($metodo, ['GET']);
-        (new CepController(new ViaCepService()))->consultar($partes[1]);
-    }
-    Http::json(['erro' => 'Rota não encontrada.'], 404);
 } catch (Throwable $erro) {
-    error_log((string) $erro);
-    Http::json(['erro' => 'Não foi possível concluir a operação. Tente novamente.'], 500);
+    error_log($erro->getMessage());
+    http_response_code(500);
+    if ($acao === 'cep') {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['erro' => 'Não foi possível consultar o CEP. Preencha o endereço manualmente.']);
+    } else {
+        echo 'Não foi possível concluir a operação. Tente novamente.';
+    }
 }
