@@ -1,0 +1,5 @@
+/storage/*.sqlite*
+.DS_Store
+*.log
+APRESENTACAO.md
+apresentacao.md
