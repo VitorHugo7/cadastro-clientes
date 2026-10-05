@@ -16,7 +16,7 @@ final class ViaCepService
             CURLOPT_TIMEOUT => 6,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_HTTPHEADER => ['Accept: application/json'],
-            CURLOPT_USERAGENT => 'CadastroClientes-Academico/1.0',
+            CURLOPT_USERAGENT => 'CadastroClientes-Academico/2.0',
         ]);
         $conteudo = curl_exec($requisicao);
         $status = curl_getinfo($requisicao, CURLINFO_RESPONSE_CODE);
