@@ -3,11 +3,24 @@ declare(strict_types=1);
 
 final class Cliente
 {
-    public function __construct(private PDO $banco) {}
+    private PDO $banco;
 
-    public function listar(): array
+    public function __construct(PDO $banco)
     {
-        return $this->banco->query('SELECT * FROM clientes ORDER BY id DESC')->fetchAll();
+        $this->banco = $banco;
+    }
+
+    public function listar(string $busca = ''): array
+    {
+        $consulta = $this->banco->prepare('SELECT * FROM clientes
+            WHERE nome LIKE :nome OR email LIKE :email OR cidade LIKE :cidade
+            ORDER BY id DESC');
+        $consulta->execute([
+            'nome' => '%' . $busca . '%',
+            'email' => '%' . $busca . '%',
+            'cidade' => '%' . $busca . '%',
+        ]);
+        return $consulta->fetchAll();
     }
 
     public function buscar(int $id): ?array
@@ -61,7 +74,7 @@ final class Cliente
         return ['dados' => $dados, 'erros' => $erros];
     }
 
-    public function salvar(array $dados, ?int $id = null): array
+    public function salvar(array $dados, ?int $id = null): void
     {
         // Placeholders mantêm os valores separados do comando SQL.
         if ($id === null) {
@@ -76,7 +89,5 @@ final class Cliente
             $dados['id'] = $id;
         }
         $this->banco->prepare($sql)->execute($dados);
-        $id ??= (int) $this->banco->lastInsertId();
-        return $this->buscar($id);
     }
 }
